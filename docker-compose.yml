@@ -1,0 +1,208 @@
+services:
+  # === OLD ARCHITECTURE SERVICES ===
+
+  old-api:
+    build:
+      context: ./services/old-architecture
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      MERCHANT_WEBHOOK_URL: http://merchant-old:4000/webhooks
+      RUST_LOG: info
+    depends_on:
+      - merchant-old
+    container_name: old-api
+
+  merchant-old:
+    build:
+      context: ./services/merchant-simulator
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      INSTANCE_NAME: merchant-old
+      RUST_LOG: info
+    container_name: merchant-old
+
+  # === SHARED INFRASTRUCTURE ===
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: dodo_demo
+      POSTGRES_USER: dodo
+      POSTGRES_PASSWORD: dodo_pass
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dodo -d dodo_demo"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    container_name: postgres
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    container_name: zookeeper
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server=localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    container_name: kafka
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    container_name: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  sequin:
+    image: sequin/sequin:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "7376:7376"
+    environment:
+      SECRET_KEY_BASE: "zMP00a3HXBShE0QJJ3KMKw2u7AKaSgJwfGd6Yblrwr/NpkAf3jGrNymiR503FE712HvIuTb3r+y5mTNBwKgRcg=="
+      VAULT_KEY: "Msf2fZcgaJXI71drCiF/bseXT0QlpMUs1IOx4QWQiu8="
+      PG_URL: postgres://dodo:dodo_pass@postgres:5432/dodo_demo
+      REDIS_URL: redis://redis:6379/0
+      PORT: 7376
+    container_name: sequin
+
+  restate:
+    image: docker.io/restatedev/restate:1.5
+    ports:
+      - "8080:8080"  # Admin API
+      - "9070:9070"  # Ingress
+      - "9090:9090"  # Metrics
+    environment:
+      RUST_LOG: info
+    volumes:
+      - restate_data:/restate-data
+      - ./infrastructure/restate/restate.toml:/etc/restate/restate.toml
+    command: ["--config-file", "/etc/restate/restate.toml"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    container_name: restate
+
+  # === NEW ARCHITECTURE SERVICES ===
+
+  new-api:
+    build:
+      context: ./services/new-architecture/api-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgres://dodo:dodo_pass@postgres:5432/dodo_demo
+      PORT: 3001
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    container_name: new-api
+
+  data-service:
+    build:
+      context: ./services/new-architecture/data-service
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      DATABASE_URL: postgres://dodo:dodo_pass@postgres:5432/dodo_demo
+      PORT: 3002
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    container_name: data-service
+
+  svix-caller:
+    build:
+      context: ./services/new-architecture/svix-caller
+      dockerfile: Dockerfile
+    ports:
+      - "9080:9080"  # HTTP endpoint for Restate ingress
+    environment:
+      PORT: 9080
+      DATA_SERVICE_URL: http://data-service:3002
+      SVIX_AUTH_TOKEN: ${SVIX_AUTH_TOKEN}
+      RUST_LOG: info
+    env_file:
+      - .env
+    depends_on:
+      kafka:
+        condition: service_healthy
+      restate:
+        condition: service_started
+      data-service:
+        condition: service_started
+    container_name: svix-caller
+
+  merchant-new:
+    build:
+      context: ./services/merchant-simulator
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"
+    environment:
+      PORT: 4001
+      INSTANCE_NAME: merchant-new
+      RUST_LOG: info
+    container_name: merchant-new
+
+volumes:
+  postgres_data:
+  restate_data:
+
+networks:
+  default:
+    name: dodo-demo-network

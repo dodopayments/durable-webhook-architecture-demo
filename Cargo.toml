@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "services/old-architecture",
+    "services/merchant-simulator",
+    "services/new-architecture/api-service",
+    "services/new-architecture/data-service",
+    "services/new-architecture/svix-caller",
+]
+
+resolver = "2"

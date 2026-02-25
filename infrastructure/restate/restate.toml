@@ -1,0 +1,7 @@
+# Restate Configuration for Webhook Demo
+# Reference: https://docs.restate.dev/operations/configuration
+
+# Kafka cluster configuration for CDC subscriptions
+[[ingress.kafka-clusters]]
+name = "local"
+brokers = ["kafka:9092"]
