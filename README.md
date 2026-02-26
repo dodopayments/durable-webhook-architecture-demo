@@ -1,6 +1,6 @@
 # Reliable Webhook Architecture Demo
 
-This is a webhook replication of the Dodo Payments production architecture. Read the full blog post here: [Building Reliable Webhooks at Scale]([https://dodo.dev/blog/reliable-webhooks](https://medium.com/dodopayments/building-webhooks-that-never-fail-our-journey-to-99-99-delivery-reliability-f69ed069cf00))
+This is a webhook replication of the Dodo Payments production architecture. Read the full blog post here: [Building Reliable Webhooks at Scale](https://medium.com/dodopayments/building-webhooks-that-never-fail-our-journey-to-99-99-delivery-reliability-f69ed069cf00)
 
 Production-grade webhook delivery system replicating Dodo Payments' reliable webhook infrastructure at scale.
 
